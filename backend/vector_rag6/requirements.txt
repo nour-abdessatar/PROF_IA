@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+google-genai
+langsmith
+qdrant-client
+sentence-transformers
+transformers
+torch
+httpx
+python-dotenv
+pydantic
+langchain-core
+langchain
+flashrank
