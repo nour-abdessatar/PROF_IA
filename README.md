@@ -1,8 +1,8 @@
 # Prof IA — Arabic math tutor with RAG and interactive diagrams
 
-A tutoring assistant for Tunisian 7ème students. A student asks a question (in Arabic,
-French words are tolerated) and Prof IA always answers in Arabic; the app finds the right lesson in the official curriculum, explains it in Arabic
-**one point at a time**, draws an interactive diagram, speaks the explanation, and
+A tutoring assistant for Tunisian 7ème students. A student asks a question in Arabic
+(French words are tolerated) and Prof IA always answers in Arabic. The app finds the
+right lesson in the curriculum, explains it **one point at a time**, draws an interactive diagram, speaks the explanation, and
 can give exercises and grade the student's answers.
 
 > **Problem it solves:** generic chatbots answer from memory, drift away from the
@@ -23,6 +23,7 @@ can give exercises and grade the student's answers.
 - **Out-of-programme detection:** the router knows the curriculum and declines topics that are not in it.
 - **Voice:** ElevenLabs text-to-speech with character alignment (optional).
 - **Streaming:** Server-Sent Events, so text appears while the model is still writing.
+- **Student and admin spaces:** Supabase authentication, onboarding, level tests, and an admin area to manage courses and multiple-choice tests (React frontend).
 
 ## Architecture
 
@@ -37,7 +38,7 @@ flowchart LR
     L --> S[Stream splitter<br/>WIDGET / SPEECH / TEACHER]
     S --> W[Widget registry<br/>layout + repair]
     S --> V[TTS<br/>ElevenLabs]
-    W & V --> SSE[SSE to React frontend]
+    W & V --> SSE[SSE to React frontend<br/>Supabase auth + data]
     R -->|out of programme| O[Fixed reply]
 ```
 
@@ -50,6 +51,9 @@ flowchart LR
 | Generation | `llm.py` | LangChain Gemini chain with model fallback |
 | Streaming | `stream_splitter.py`, `stream_handler.py` | Split the stream into sections, build and repair widgets, add audio |
 | API | `api.py` | FastAPI app, SSE endpoints |
+| Frontend | `frontend/` | React + Vite app; Supabase for auth, database and storage |
+
+Backend code lives in `backend/rag/`, evaluation in `backend/eval/`, the course JSON in `backend/data/`.
 
 ### Design decisions
 
@@ -61,40 +65,51 @@ flowchart LR
 
 ## Run it
 
-Requirements: Docker, a Gemini API key. About 3 GB of disk for model weights.
+Requirements: Docker, a Gemini API key, a free Supabase project. About 3 GB of disk for model weights.
+
+### 1. Supabase (frontend auth and data)
+
+1. Create a project on https://app.supabase.com and copy the URL and the anon key (Project Settings, API).
+2. In the SQL Editor, run `frontend/supabase/schema.sql` (replace the admin email in it first).
+3. For local tests, you can turn off *Confirm email* (Authentication, Providers, Email).
+
+The first account created with `VITE_ADMIN_EMAIL` becomes administrator (`/admin`); other accounts are students.
+
+### 2. Configure and start
 
 ```bash
-git clone https://github.com/<you>/<repo>.git && cd <repo>
-cp backend/.env.example backend/.env       # add your keys
-cp frontend/.env.example frontend/.env
+git clone https://github.com/nour-abdessatar/PROF_IA.git && cd PROF_IA
+cp backend/rag/.env.example backend/rag/.env   # add your Gemini key (and optional ElevenLabs)
+cp frontend/.env.example frontend/.env         # add the Supabase URL and anon key
 
-# put your course JSON in backend/data/ (see "Data" below), then:
-docker compose up --build
+docker compose --env-file frontend/.env up --build
 docker compose run --rm backend python pipeline.py ingest --input data/mathgeo.json
 
 # app: http://localhost:8080   API: http://localhost:8001
 ```
 
-First start downloads the embedding and reranker models (cached in a Docker volume).
+The first start downloads the embedding and reranker models (cached in a Docker volume).
 
-Without Docker:
+### Without Docker
 
 ```bash
-cd backend && python -m venv .venv && source .venv/bin/activate
+cd backend/rag && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python pipeline.py ingest --input data/mathgeo.json
+python pipeline.py ingest --input ../data/mathgeo.json
 uvicorn api:app --port 8001
 # in another terminal
 cd frontend && npm install && npm run dev
 ```
 
+Frontend variables (`frontend/.env`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ADMIN_EMAIL`, `VITE_API_BASE` (the backend, `http://localhost:8001`).
+
 ### Data
 
-The course JSON used by the app is included in `backend/data/`. <!-- TODO: add its source and license, e.g. "Based on the official Tunisian 7ème programme". -->
+The course JSON used by the app is `backend/data/mathgeo.json`. <!-- TODO: add its source, e.g. "Based on the official Tunisian 7ème programme". -->
 
 ### Configuration
 
-See `backend/.env.example`. Keys: `GEMINI_API_KEY` / `GOOGLE_API_KEY` (required), `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID` (optional audio), `LANGSMITH_*` (optional tracing), `CURRICULUM_JSON`, `OOP_MIN_SCORE`.
+See `backend/rag/.env.example`. Keys: `GEMINI_API_KEY` / `GOOGLE_API_KEY` (required), `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID` (optional audio), `LANGSMITH_*` (optional tracing), `CURRICULUM_JSON`, `OOP_MIN_SCORE`.
 
 ## Evaluation
 
@@ -111,14 +126,29 @@ How to read these numbers: the questions were written by the author, on a single
 subject with a small curriculum, so they show the pipeline works on the cases it was
 designed for. They are not a claim of 100% accuracy on real students' questions
 (spelling mistakes, dialect, vague questions). The groundedness check is only 6
-answers. <!-- TODO: add where the latency was measured (CPU or GPU, which Gemini model, with or without TTS) and the path of the eval script, e.g. `python eval/run_eval.py`. -->
+answers. <!-- TODO: say where the latency was measured (CPU or GPU, which Gemini model, with or without TTS). -->
+
+Reproduce (scripts and datasets in `backend/eval/`, reports in `backend/eval/reports/`):
+
+```bash
+cd backend/eval
+export PYTHONPATH=../rag GEMINI_API_KEY=your_key    # PowerShell: $env:PYTHONPATH="../rag"
+python router_eval.py --dataset datasets/router_eval_set.json
+python retrieval_eval.py --dataset datasets/retrieval_eval_set.json --k 4
+python groundedness_eval_batched.py --dataset datasets/groundedness_live_set.json --mode live
+```
+
+The retrieval evaluation needs the course to be ingested first.
 
 ## Known limitations
 
 - Embedded Qdrant allows one process on its folder, so the API runs with a single worker. Use a Qdrant server for more.
 - Answers are in Arabic only for now (7ème, Arabic-medium); French support was removed on purpose and may return for lycée.
 - `select_relevant_lessons` assumes best-first order but receives reordered chunks (see the TODO in `pipeline.py`).
+- The evaluation sets are small and hand-written (see above).
 
 ## Tech stack
 
-Python, FastAPI, Qdrant, sentence-transformers, BGE reranker, Gemini (LangChain), ElevenLabs, LangSmith, React + Vite, Docker.
+Python, FastAPI, Qdrant, sentence-transformers, BGE reranker, Gemini (LangChain), ElevenLabs, LangSmith, React, Vite, TypeScript, Tailwind, shadcn/ui, Supabase, Docker.
+
+The first version of the frontend UI was scaffolded with Lovable, then adapted to the backend.
