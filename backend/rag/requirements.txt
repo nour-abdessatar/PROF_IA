@@ -1,0 +1,15 @@
+fastapi==0.136.1
+uvicorn==0.41.0
+google-genai==1.66.0
+langchain-google-genai==4.2.1
+langsmith==0.7.6
+qdrant-client==1.6.9
+sentence-transformers==5.2.3
+transformers==4.57.6
+torch==2.8.0
+httpx==0.28.1
+python-dotenv==1.2.1
+pydantic==2.10.6
+langchain-core==1.2.14
+langchain==1.2.10
+
