@@ -1,3 +1,4 @@
+
 # Prof IA — Arabic math tutor with RAG and interactive diagrams
 
 A tutoring assistant for Tunisian 7ème students. A student asks a question in Arabic
@@ -10,6 +11,8 @@ can give exercises and grade the student's answers.
 > curriculum, tracks progress through a lesson, and refuses (politely) topics that
 > are not in the programme.
 
+
+https://github.com/user-attachments/assets/4f53feb6-d54c-4907-9296-2652d235f6c1
 [▶ Watch the demo (with voice)](https://github.com/nour-abdessatar/PROF_IA/raw/main/docs/demo.mp4)
 ## Features
 
