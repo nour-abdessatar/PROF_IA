@@ -40,6 +40,7 @@ export interface HistoryMessage {
   id: string;
   role: "user" | "ai";
   content: string;
+  representation?: string;
 }
 
 export const ask = (question: string, session_id: string) =>
@@ -62,6 +63,7 @@ export async function askStream(
     .map(m => ({
       role: m.role === "ai" ? "model" : "user",
       content: m.content,
+      representation: m.representation,
     }));
 
   const res = await fetch(`${API_BASE}/ask/stream`, {
@@ -86,15 +88,39 @@ export async function askStream(
 //
 // Consumes the SSE events produced by /ask/stream (text/event-stream).
 // Event types:
-//   {"type": "widget_chunk", "text": "..."}   — incremental widget HTML (ignored for display, kept for onToken)
-//   {"type": "done", "widget": "...", "teacher": "..."}  — final split output
+//   {"type": "widget_chunk", "text": "..."}   — incremental widget JSON fragment (progress signal only, not renderable)
+//   {"type": "teacher_chunk", "text": "..."}  — incremental teacher text, safe to append to the visible message live
+//   {"type": "audio_chunk", "index": N, "text": "...", "audio_base64": "...", "alignment": {...} | null}
+//                                               — one synthesized [SPEECH] sentence, in submission order (see
+//                                                 tts_chunker.py — the backend already guarantees these arrive
+//                                                 index-ascending, no client-side reordering needed)
+//   {"type": "audio_done", "count": N}         — every audio_chunk for this turn has been sent (queue drained
+//                                                 server-side); NOT the same as "the last chunk finished playing"
+//                                                 client-side — playback of the last chunk can still be in progress
+//   {"type": "done", "widget": "...", "teacher": "..."}  — final split output, source of truth to reconcile against
 //   {"type": "stream_end"}                     — generation complete
 //   {"type": "error", "message": "..."}        — server error
 
+export interface AudioChunkPayload {
+  index: number;
+  text: string;
+  audio_base64: string;
+  alignment?: unknown;
+}
+
 export interface AskStreamSseCallbacks {
-  onToken  : (token: string) => void;
-  onDone   : (widget: string, teacher: string) => void;
-  onError? : (message: string) => void;
+  onToken       : (token: string) => void;
+  onTeacherToken?: (token: string) => void;
+  // NEW: audio_chunk/audio_done wiring — see stream_handler.py's
+  // SpeechChunk branch (v2.0) and tts_chunker.py. Previously these two
+  // SSE event types had no case in the switch below at all and fell
+  // through to `default: break` — every audio_chunk the backend ever
+  // sent was silently dropped, so no audio ever reached the client
+  // regardless of what the backend did.
+  onAudioChunk?  : (chunk: AudioChunkPayload) => void;
+  onAudioDone?   : (count: number) => void;
+  onDone         : (widget: string, teacher: string, representation?: string) => void;
+  onError?       : (message: string) => void;
 }
 
 export async function askStreamSse(
@@ -111,8 +137,9 @@ export async function askStreamSse(
   const mappedHistory = history
     .filter(m => m.content.trim() !== "")
     .map(m => ({
-      role   : m.role === "ai" ? "model" : "user",
-      content: m.content,
+      role          : m.role === "ai" ? "model" : "user",
+      content       : m.content,
+      representation: m.representation,
     }));
 
   const res = await fetch(`${API_BASE}/ask/stream`, {
@@ -130,6 +157,21 @@ export async function askStreamSse(
   const reader  = res.body!.getReader();
   const decoder = new TextDecoder();
   let   buffer  = "";
+  // FIX (silent truncation): tracks whether a "done" SSE event was ever
+  // actually received. Without this, if the HTTP response stream closes
+  // early — backend crash mid-generation, proxy/timeout cutting the
+  // connection, server restart, etc. — reader.read() eventually just
+  // returns { done: true } on its own, identical to a normal successful
+  // end of stream. The while loop below exits via `break`, no exception
+  // is ever thrown, and askStreamSse resolves as if everything succeeded.
+  // Chat.tsx's try/catch around askStreamSse never fires, so the message
+  // is silently left with whatever partial teacher_chunk text had
+  // accumulated so far — no error shown, no "❌" prefix, and that partial
+  // fragment gets saved to Supabase as if it were the complete answer.
+  // This is what produced old conversations with clean-looking but
+  // truncated `teacher` text and no error trace anywhere. See the
+  // `if (!sawDone)` check after the loop below for the actual fix.
+  let   sawDone = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -157,17 +199,54 @@ export async function askStreamSse(
 
       switch (msg.type) {
         case "widget_chunk":
-          // Raw partial widget HTML — passed to onToken so TypingIndicator
+          // Raw partial widget JSON — passed to onToken so TypingIndicator
           // stays active; Chat.tsx intentionally ignores the token value.
           if (typeof msg.text === "string") {
             callbacks.onToken(msg.text);
           }
           break;
 
+        // FIX (live streaming): new event type — see stream_handler.py
+        // v3.2. Previously any event type not explicitly handled here
+        // silently fell through to `default: break`, so even once the
+        // backend started emitting incremental teacher text there was
+        // nothing on this side to pick it up. Routed to its own callback
+        // (not onToken) so Chat.tsx can append it to the visible message
+        // without it being confused with — or mixed together with —
+        // raw widget_chunk JSON fragments.
+        case "teacher_chunk":
+          if (typeof msg.text === "string") {
+            callbacks.onTeacherToken?.(msg.text);
+          }
+          break;
+
+        // NEW: one synthesized [SPEECH] sentence. Forwarded as-is —
+        // Chat.tsx owns the playback queue/ordering logic, this layer
+        // only unwraps the SSE envelope.
+        case "audio_chunk":
+          if (typeof msg.audio_base64 === "string") {
+            callbacks.onAudioChunk?.({
+              index       : typeof msg.index === "number" ? msg.index : 0,
+              text        : typeof msg.text  === "string" ? msg.text  : "",
+              audio_base64: msg.audio_base64,
+              alignment   : msg.alignment,
+            });
+          }
+          break;
+
+        // NEW: server-side "no more audio_chunk events coming this turn"
+        // signal. Does not by itself mean playback has finished client-side
+        // — Chat.tsx's queue may still have chunks buffered/playing.
+        case "audio_done":
+          callbacks.onAudioDone?.(typeof msg.count === "number" ? msg.count : 0);
+          break;
+
         case "done":
+          sawDone = true;
           callbacks.onDone(
-            typeof msg.widget  === "string" ? msg.widget  : "",
-            typeof msg.teacher === "string" ? msg.teacher : "",
+            typeof msg.widget         === "string" ? msg.widget         : "",
+            typeof msg.teacher        === "string" ? msg.teacher        : "",
+            typeof msg.representation === "string" ? msg.representation : undefined,
           );
           break;
 
@@ -187,6 +266,21 @@ export async function askStreamSse(
           break;
       }
     }
+  }
+
+  // FIX (silent truncation, continued): the stream ended (reader signaled
+  // done) but we never saw a "done" SSE event from the backend — the
+  // connection was cut short partway through generation. Previously this
+  // fell through and the function resolved normally, leaving Chat.tsx's
+  // try/catch none the wiser and the message stuck with only whatever
+  // partial teacher_chunk text arrived before the cutoff. Surface it as a
+  // real error instead, so the caller's catch block runs and the message
+  // is visibly marked as failed/incomplete rather than silently saved as
+  // if it were the final, complete answer.
+  if (!sawDone) {
+    const message = "Stream ended before completion";
+    callbacks.onError?.(message);
+    throw new Error(message);
   }
 }
 

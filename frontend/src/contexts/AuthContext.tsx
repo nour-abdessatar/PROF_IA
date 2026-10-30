@@ -9,6 +9,7 @@ interface AuthState {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -65,12 +66,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null };
   };
 
+  // NEW: Google OAuth sign-in. Uses Supabase's hosted OAuth flow, which
+  // redirects the browser to Google's real account chooser and back —
+  // requires the Google provider to be enabled in the Supabase dashboard
+  // (Authentication → Providers → Google) with a valid Google Cloud OAuth
+  // client ID/secret, and this origin's redirect URL whitelisted there.
+  // Unlike signIn/signUp, there's no local error to catch beyond the
+  // initial call failing (e.g. provider not configured) — a successful
+  // call navigates the browser away immediately, so the caller never
+  // "completes" in the normal sense. The eventual session is picked up
+  // by the onAuthStateChange listener above once the user lands back here.
+  const signInWithGoogle = async () => {
+    const redirectTo = `${window.location.origin}/`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+    return { error: error?.message ?? null };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthCtx.Provider value={{ session, user, role, loading, signIn, signUp, signOut }}>
+    <AuthCtx.Provider value={{ session, user, role, loading, signIn, signUp, signInWithGoogle, signOut }}>
       {children}
     </AuthCtx.Provider>
   );

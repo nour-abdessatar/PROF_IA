@@ -1,0 +1,45 @@
+# Secrets (keep the examples)
+.env
+.env.*
+!.env.example
+
+# Python (backend)
+__pycache__/
+*.pyc
+.pytest_cache/
+venv*/
+.venv/
+
+# Generated / local data
+output/
+qdrant_storage/
+qdrant_local/
+*.log
+logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Private data: only the sample is public
+backend/data/*
+!backend/data/sample/
+
+# Model and audio caches
+.cache/
+*.mp3
+*.wav
+
+# Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+supabase/.temp/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.sw?

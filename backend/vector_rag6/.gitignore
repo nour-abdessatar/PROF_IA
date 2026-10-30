@@ -1,8 +1,0 @@
-.env
-__pycache__/
-*.pyc
-output/qdrant_local/
-output/chunks_embedded.json
-output/embedded_chunk.json
-venv*/
-.venv/

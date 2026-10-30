@@ -1,0 +1,35 @@
+{
+  "n": 38,
+  "intent_accuracy": 1.0,
+  "mode_accuracy": 1.0,
+  "hard_check_rate": 0.4473684210526316,
+  "confusion": {
+    "lesson": {
+      "lesson": 13
+    },
+    "summary": {
+      "summary": 3
+    },
+    "exercise": {
+      "exercise": 9
+    },
+    "exercise_answer": {
+      "exercise_answer": 5
+    },
+    "follow_up": {
+      "follow_up": 4
+    },
+    "action": {
+      "action": 4
+    }
+  },
+  "per_intent_total": {
+    "lesson": 13,
+    "summary": 3,
+    "exercise": 9,
+    "exercise_answer": 5,
+    "follow_up": 4,
+    "action": 4
+  },
+  "failures": []
+}

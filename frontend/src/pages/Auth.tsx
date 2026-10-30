@@ -12,11 +12,12 @@ export default function Auth() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [info, setInfo] = useState("");
   const navigate = useNavigate();
   const lang = useLang();
   const isAr = lang === "ar";
-  const { signIn, signUp, user, role, loading } = useAuth();
+  const { signIn, signUp, signInWithGoogle, user, role, loading } = useAuth();
 
   useEffect(() => {
     if (loading) return;
@@ -53,6 +54,21 @@ export default function Auth() {
       return; // useEffect above will redirect once session arrives
     }
     // login: useEffect will redirect once role loads
+  };
+
+  // NEW: Google OAuth. A successful call navigates the browser away to
+  // Google's account picker immediately, so googleBusy only really shows
+  // for the brief moment before that redirect kicks in. If the call itself
+  // fails (e.g. provider not enabled in Supabase dashboard), we surface
+  // that as a normal inline error same as email/password. If the user
+  // cancels the Google picker and lands back on this page, there's no
+  // error to show — it just looks like nothing happened, which is correct.
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setGoogleBusy(true);
+    const { error: err } = await signInWithGoogle();
+    setGoogleBusy(false);
+    if (err) setError(err);
   };
 
   return (
@@ -97,6 +113,35 @@ export default function Auth() {
                 {tb === "login" ? t("login", lang) : t("signup", lang)}
               </button>
             ))}
+          </div>
+
+          <motion.button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={googleBusy}
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
+            className={`w-full py-3.5 mb-5 rounded-xl bg-card border border-border text-foreground font-medium text-sm flex items-center justify-center gap-3 shadow-sm hover:shadow-hover transition-shadow disabled:opacity-60 disabled:cursor-not-allowed`}
+          >
+            {googleBusy ? (
+              "…"
+            ) : (
+              <>
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4c-7.5 0-13.9 4.2-17.2 10.4z"/>
+                  <path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.3-5.1l-6.6-5.6C29.6 35 26.9 36 24 36c-5.3 0-9.7-3.1-11.3-7.9l-6.6 5.1C9.9 39.8 16.4 44 24 44z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.8l6.6 5.6C41.5 36.6 44 30.8 44 24c0-1.3-.1-2.7-.4-3.5z"/>
+                </svg>
+                {isAr ? "المتابعة باستخدام جوجل" : "Continuer avec Google"}
+              </>
+            )}
+          </motion.button>
+
+          <div className="flex items-center gap-3 mb-5">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">{isAr ? "أو" : "OU"}</span>
+            <div className="h-px flex-1 bg-border" />
           </div>
 
           <AnimatePresence mode="wait">

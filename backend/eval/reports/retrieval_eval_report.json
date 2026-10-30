@@ -1,0 +1,9 @@
+{
+  "n": 30,
+  "k": 4,
+  "recall_at_k": 1.0,
+  "mrr": 0.9611111111111111,
+  "multi_topic_total": 4,
+  "multi_topic_full_recall_rate": 1.0,
+  "failures": []
+}

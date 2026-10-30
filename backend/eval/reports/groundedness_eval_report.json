@@ -1,0 +1,44 @@
+[
+  {
+    "question": "اشرح لي خصائص القوى",
+    "teacher_output": "بالتأكيد! لنتعرف على خصائص القوى الأساسية التي ستساعدك في تبسيط العمليات الحسابية:\n\n-   **ضرب قوتين لهما نفس القاعدة**: كما يظهر في الرسم أمامك، إذا كان لدينا قوتان لهما نفس القاعدة (مثل ⁦aᵐ⁩ و ⁦aⁿ⁩)، فإننا نجمع القوتين ونحتفظ بنفس القاعدة. تصبح القاعدة ⁦aᵐ × aⁿ = aᵐ⁺ⁿ⁩.\n-   **ضرب قوتين لهما نفس دليل القوة**: إذا كان لدينا قوتان لهما نفس دليل القوة (مثل ⁦aⁿ⁩ و ⁦bⁿ⁩)، فإننا نضرب القاعدتين ونحتفظ بنفس دليل القوة. تصبح القاعدة ⁦aⁿ × bⁿ = (a × b)ⁿ⁩.\n-   **قوة قوة**: عندما تكون لدينا قوة مرفوعة لقوة أخرى (مثل ⁦(aᵐ)ⁿ⁩)، فإننا نضرب القوتين معًا ونحتفظ بنفس القاعدة. تصبح القاعدة ⁦(aᵐ)ⁿ = aᵐⁿ⁩.\n\nهل فهمت هذه النقطة؟ نكمل للتالية؟",
+    "grounded": true,
+    "confidence": "high",
+    "reason": "The teacher's explanation accurately reflects the rules for multiplying powers with the same base, same exponent, and power of a power, all of which are explicitly mentioned in the lesson content."
+  },
+  {
+    "question": "فسرلي القسمة الإقليدية",
+    "teacher_output": "القسمة الإقليدية هي عملية قسمة بين أعداد صحيحة طبيعية، تعطينا خارج قسمة وباقياً. كما يظهر في الرسم أمامك، يمكننا كتابة القسمة الإقليدية بالصيغة ⁦a = b × q + r⁩. في هذه الصيغة، لدينا أربعة عناصر أساسية:\n- ⁦a⁩ هو المقسوم، وهو العدد الذي نريد قسمته.\n- ⁦b⁩ هو القاسم، وهو العدد الذي نقسم عليه.\n- ⁦q⁩ هو خارج القسمة، وهو عدد المرات التي يتكرر فيها القاسم في المقسوم.\n- ⁦r⁩ هو الباقي، وهو ما يتبقى بعد عملية القسمة.\nكما هو موضح أيضاً، الباقي ⁦r⁩ يجب أن يكون دائماً أكبر من أو يساوي ⁦0⁩ وأصغر تماماً من القاسم ⁦b⁩، أي ⁦0 ≤ r < b⁩. مثلاً، إذا قسمنا ⁦25⁩ على ⁦4⁩، فإن ⁦25 = 4 × 6 + 1⁩، حيث ⁦25⁩ هو المقسوم، ⁦4⁩ هو القاسم، ⁦6⁩ هو خارج القسمة، و ⁦1⁩ هو الباقي.\nهل فهمت هذه النقطة؟ نكمل للتالية؟",
+    "grounded": true,
+    "confidence": "high",
+    "reason": "The teacher's explanation of the Euclidean division, including its formula and the conditions for the remainder, is directly supported by the lesson content which defines the elements of Euclidean division and its properties."
+  },
+  {
+    "question": "اشرح المنصف العمودي وخصائصه",
+    "teacher_output": "المنصف العمودي لقطعة مستقيمة هو مستقيم يمر من منتصف هذه القطعة ويكون عمودياً عليها. كما يظهر في الرسم أمامك، لدينا القطعة المستقيمة ⁦AB⁩ باللون البنفسجي، والنقطة ⁦M⁩ باللون البرتقالي هي منتصف هذه القطعة. المستقيم ⁦(d)⁩ باللون الأخضر هو المنصف العمودي للقطعة ⁦AB⁩ لأنه يمر من ⁦M⁩ وعمودي على ⁦AB⁩. هل فهمت هذه النقطة؟ نكمل للتالية؟",
+    "grounded": true,
+    "confidence": "high",
+    "reason": "The teacher's definition of the perpendicular bisector as a line passing through the midpoint and being perpendicular to the segment is consistent with the lesson content's mention of 'The perpendicular bisector of a line segment'."
+  },
+  {
+    "question": "فسرلي أنواع الزوايا",
+    "teacher_output": "مرحباً بك! سنتعرف اليوم على أنواع الزوايا المختلفة. لنبدأ بالزاويتين المتجاورتين.\n- كما يظهر في الرسم أمامك، الزاويتان ⁦∠AOB⁩ و ⁦∠BOC⁩ هما زاويتان متجاورتان.\n- تتميز الزاويتان المتجاورتان بأن لهما نفس الرأس O، وضلع مشترك هو ⁦OB⁩، وهما لا تتداخلان (لا تشتركان في أي نقاط داخلية).\nهل فهمت هذه النقطة؟ نكمل للتالية؟",
+    "grounded": true,
+    "confidence": "high",
+    "reason": "The teacher's explanation of adjacent angles, including their shared vertex, common side, and non-overlapping nature, aligns with the lesson content's definition of 'adjacent angles'."
+  },
+  {
+    "question": "اشرح لي مناظرة الدائرة في التناظر المحوري",
+    "teacher_output": "مرحباً بك! لنتحدث عن مناظرة الدائرة في التناظر المحوري. كما يظهر في الرسم أمامك، لدينا المحور (d) المرسوم باللون البنفسجي، والدائرة (C) المرسومة باللون الأخضر، ومركزها O المرسوم باللون البرتقالي. لاحظ أن النقطة O، وهي مركز الدائرة (C)، تقع مباشرة على المحور (d). في هذه الحالة الخاصة، بما أن مركز الدائرة يقع على محور التناظر، فإن مناظرة المركز O بالنسبة للمحور (d) هي النقطة O نفسها، أي أن O' تنطبق على O. وبما أن التناظر المحوري يحافظ على الأبعاد، فإن نصف قطر الدائرة يبقى كما هو، وبالتالي فإن الدائرة (C) نفسها هي مناظرتها بالنسبة للمحور (d). هل فهمت هذه النقطة؟ نكمل للتالية؟",
+    "grounded": true,
+    "confidence": "high",
+    "reason": "The teacher's explanation of the symmetry of a circle with respect to an axis when its center lies on the axis is directly stated in the lesson content: 'Symmetry of a circle (if the center is on the axis of symmetry, the circle remains the same)'."
+  },
+  {
+    "question": "فسرلي القاسم المشترك الأكبر",
+    "teacher_output": "مرحباً بك! لفهم القاسم المشترك الأكبر، دعنا نتبع هذه الخطوات معاً باستخدام مثال.\n- أولاً، قواسم العدد هي كل الأعداد التي يمكن أن نقسم عليها هذا العدد ويكون الباقي صفر. كما يظهر أمامك، قواسم العدد ⁦12⁩ هي ⁦{1, 2, 3, 4, 6, 12}⁩، وقواسم العدد ⁦18⁩ هي ⁦{1, 2, 3, 6, 9, 18}⁩.\n- ثانياً، القواسم المشتركة هي الأعداد التي تقسم كلا العددين في نفس الوقت. في مثالنا، القواسم المشتركة بين ⁦12⁩ و⁦18⁩ هي ⁦{1, 2, 3, 6}⁩.\n- وأخيراً، القاسم المشترك الأكبر (PGCD) هو أكبر عدد من بين هذه القواسم المشتركة. كما هو موضّح على الشاشة، أكبر قاسم مشترك بين ⁦12⁩ و⁦18⁩ هو ⁦6⁩، ونكتب ⁦PGCD(12, 18) = 6⁩.\nهل فهمت هذه النقطة؟ نكمل للتالية؟",
+    "grounded": true,
+    "confidence": "high",
+    "reason": "The teacher's explanation of the greatest common divisor (GCD) by first listing divisors, then common divisors, and finally identifying the largest among them, is a direct application of the concepts presented in the lesson content regarding divisors and common divisors."
+  }
+]

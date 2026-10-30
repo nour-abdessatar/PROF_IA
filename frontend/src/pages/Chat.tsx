@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, User, X, Plus, MessageSquare, Trash2, PanelRight } from "lucide-react";
+import { Send, Mic, User, X, Plus, MessageSquare, Trash2, PanelRight, LogOut } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { MessageBubble } from "@/components/MessageBubble";
 import AvatarPanel from "@/components/AvatarPanel";
 import { t, useLang } from "@/lib/i18n";
-import { askStreamSse, AVATAR_WS_URL } from "@/lib/api";
+import { askStreamSse, apiPost, type AudioChunkPayload } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { getUserPref } from "@/lib/userPrefs";
 
@@ -19,7 +19,10 @@ const st = (key: string, lang: "ar" | "fr"): string => {
     last_7_days:       { fr: "7 derniers jours",        ar: "آخر 7 أيام" },
     older:             { fr: "Plus ancien",             ar: "أقدم" },
     delete:            { fr: "Supprimer",               ar: "حذف" },
-    close:             { fr: "Fermer",                  ar: "إغلاب" },
+    logout:            { fr: "Se déconnecter",          ar: "تسجيل الخروج" },
+    // FIX: "إغلاب" isn't a real Arabic word — was a typo for "إغلاق" (close).
+    // Used as the sidebar close button's aria-label.
+    close:             { fr: "Fermer",                  ar: "إغلاق" },
     default_title:     { fr: "Nouvelle conversation",   ar: "محادثة جديدة" },
     empty_prompt:      { fr: "Pose ta première question pour commencer !", ar: "اطرح سؤالك الأول للبدء!" },
     limit_reached:     { fr: "Limite de conversation atteinte.",           ar: "تم بلوغ حد المحادثة." },
@@ -37,6 +40,7 @@ export interface Message {
   teacher?: string;
   structured?: { title: string; explanation: string; example: string; summary: string };
   hasWidget?: boolean;
+  representation?: string;
 }
 
 interface Conversation {
@@ -111,20 +115,65 @@ async function loadConversationsFromSupabase(userId: string): Promise<Conversati
   return ((data ?? []) as any[]).map(rowToConversation);
 }
 
+// FIX (silent save failures): this used to ignore the result of the upsert,
+// so any Supabase error (RLS, network, payload) was swallowed with no trace.
+// It now throws on error so callers' .catch() actually receives it.
 async function upsertConversation(conv: Conversation, userId: string): Promise<void> {
-  await db.from("conversations").upsert({
+  const { error } = await db.from("conversations").upsert({
     id:         conv.id,
     user_id:    userId,
     title:      conv.title,
     messages:   conv.messages,
     updated_at: new Date(conv.updatedAt).toISOString(),
   });
+  if (error) throw error;
 }
 
 async function deleteConversationFromSupabase(id: string): Promise<void> {
   await db.from("conversations").delete().eq("id", id);
 }
 
+// FIX (widget cut off / frozen on step 1 — "for now" frontend hardening):
+// The backend (stream_handler.py) tries to repair non-canonical canvas
+// widgets server-side, but its repair can fail (LLM ignores the retry
+// instruction too) and it fails OPEN — it ships the original, non-canonical
+// widget to the client rather than blocking. Previously this host CSS/JS
+// assumed every canvas widget would exactly match CANVAS_TEMPLATE's ids
+// (btnPlay/btnPrev/btnNext/btnReset/lbl) and hid + ignored every other
+// button, and always set pointerEvents:none on non-mindmap iframes, routing
+// 100% of interaction through the outer div's single "replay" click handler.
+// When a widget uses different ids (e.g. Gemini's own prevBtn/nextBtn/
+// stepLabel), that click handler's postMessage({type:'REPLAY'}) is a no-op
+// (autoPlay() finds null for btnReset/btnPlay), and the buttons required to
+// advance are hidden AND unclickable — the widget looks "stuck"/"cut".
+//
+// This patch does two things, independent of anything the backend does:
+//   1. Only hide the specific known autoplay-control ids, not every button
+//      on the page (`button:not(.mm-topbar button)` was a blanket net that
+//      caught bespoke templates' own nav buttons too).
+//   2. Detect when a widget doesn't match the canonical id contract and, in
+//      that case only, let pointer events reach the iframe (like mindmaps
+//      already do) so the widget's own buttons are clickable, instead of
+//      relying on our replay-only click forwarding.
+//
+// FIX (canvas → animated SVG engine migration): the server-owned animated
+// widget engine (prompt_builder.py's CANVAS_ENGINE_SHELL) now renders an
+// <svg id="c"> instead of a <canvas id="c">, same ids, same flex-column
+// wrapper, same iframe body{overflow:hidden}. The old `canvas { ... }` rule
+// below carried `flex: 1 1 auto` + `min-height: 0` specifically to stop a
+// flex child from overflowing its allotted space and being silently
+// clipped by that overflow:hidden (this is the exact "canvas cut off" bug
+// documented below). The `svg { ... }` rule never needed that before,
+// because it was only ever used by the mindmap widget, which isn't inside
+// this same clipped flex layout in the same way. Now that the animated
+// engine's drawing surface is an <svg>, it is exposed to the identical
+// clipping risk the canvas rule was written to prevent — so the svg rule
+// now carries the same flex/min-height/reset properties as canvas (minus
+// object-fit, which doesn't apply to inline <svg>; its own viewBox +
+// default preserveAspectRatio="xMidYMid meet" already gives equivalent
+// contain-like scaling). Safe for the mindmap widget too: flex/min-height
+// only matter if the <svg> is itself a flex item, and the border resets
+// are harmless no-ops there.
 const WIDGET_OVERRIDE_CSS = `
 <style id="__host_override__">
   *, *::before, *::after { box-sizing: border-box; }
@@ -135,11 +184,17 @@ const WIDGET_OVERRIDE_CSS = `
     height: 100% !important;
     overflow: hidden !important;
     background: transparent !important;
+    display: flex !important;
+    flex-direction: column !important;
   }
-  #btnPlay, #btnPrev, #btnNext, #btnReset,
-  [id^="btn"], button { display: none !important; }
+  /* Only the canonical autoplay-engine control ids are hidden — never a
+     blanket "every other button" rule. Non-canonical templates (different
+     ids) keep their own buttons visible. */
+  #btnPlay, #btnPrev, #btnNext, #btnReset { display: none !important; }
   #lbl { display: none !important; }
-  body > div, .wrap, div[style*="font-family"] {
+
+  /* canvas / interactive_svg templates: single top-level .wrap container */
+  .wrap, div[style*="font-family"] {
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
@@ -150,20 +205,60 @@ const WIDGET_OVERRIDE_CSS = `
     background: transparent !important;
     gap: 0 !important;
   }
+
+  /* mindmap template: two sibling top-level divs (.mm-topbar + .mm-wrap) —
+     give each its own sizing instead of letting the .wrap rule above
+     (or a generic body > div rule) force both to height:100%, which was
+     pushing .mm-wrap (markmap's actual render target) off-screen. */
+  .mm-topbar {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+  .mm-wrap {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  /* FIX (canvas cut off / clipped): width:100% + height:auto scales a
+     <canvas> (a replaced element) purely off the container's width, then
+     derives height from its intrinsic ratio (e.g. 400x300 or 480x300).
+     When the container is much wider than the canvas's native size, the
+     computed height can exceed the vertical space actually allotted to
+     this flex child, and since body has overflow:hidden !important above,
+     the overflow is silently clipped — this is what "cut off" looked like.
+     object-fit:contain + height:100% keeps the canvas fully inside its
+     box and preserves aspect ratio instead of overflowing it. */
   canvas {
     flex: 1 1 auto !important;
     width: 100% !important;
-    height: auto !important;
+    height: 100% !important;
+    object-fit: contain !important;
     min-height: 0 !important;
     display: block !important;
     border: none !important;
     border-radius: 0 !important;
     background: transparent !important;
   }
+  /* FIX (svg widget cut off — same root cause as the canvas fix above):
+     the animated widget engine now draws into <svg id="c"> instead of
+     <canvas id="c">, inside the exact same flex-column wrapper with
+     body{overflow:hidden}. Without flex:1 1 auto + min-height:0 here too,
+     this element is just as vulnerable to being sized past its allotted
+     flex space and silently clipped. Kept as one shared rule with the
+     mindmap's <svg> (markmap) — flex/min-height only take effect when the
+     svg is itself a flex item, and the border/background resets are
+     harmless no-ops for markmap's own svg. */
   svg {
+    flex: 1 1 auto !important;
     width: 100% !important;
     height: 100% !important;
+    min-height: 0 !important;
     display: block !important;
+    border: none !important;
+    border-radius: 0 !important;
     background: transparent !important;
   }
   .tabs {
@@ -196,25 +291,114 @@ const WIDGET_OVERRIDE_CSS = `
     color: rgba(255,255,255,0.55) !important;
     background: transparent !important;
   }
+
+  /* mindmap top-bar button: kept visible (unlike other widget buttons above)
+     and styled to match, since the generic button:not(.mm-topbar button)
+     rule above intentionally excludes it. */
+  .mm-topbar button {
+    padding: 6px 14px !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    border-radius: 8px !important;
+    background: rgba(255,255,255,0.10) !important;
+    color: rgba(255,255,255,0.85) !important;
+    cursor: pointer !important;
+    font-size: 12px !important;
+  }
+
+  /* Non-canonical widget templates (custom ids, e.g. prevBtn/nextBtn) keep
+     their own buttons visible and usable — give them a light default style
+     so they don't look like unstyled browser buttons, without touching any
+     inline styles the widget itself already set. */
+  .__non_canonical_widget__ button {
+    font-family: sans-serif !important;
+  }
+
+  /* NOTE: text-align override attempted here previously caused text to
+     disappear entirely (likely because .markmap-foreign > div's width
+     is set to a large var(--markmap-max-width) that doesn't match the
+     foreignObject's actual visible width, so right-aligning pushed the
+     text outside the visible area). Reverted pending more info. */
 </style>`;
 
+// FIX: the control script used to only ever try to click #btnReset /
+// #btnPlay (the canonical engine's ids) on load and on REPLAY messages.
+// For a non-canonical widget (missing those ids) this was always a silent
+// no-op, so nothing ever advanced past the widget's own initial render.
+// autoPlay() now falls back to clicking whatever "next"-like button the
+// widget actually has, so a REPLAY ping (or the initial load) at least
+// nudges a non-canonical widget forward instead of doing nothing.
 const WIDGET_SCRIPT = `
 <script id="__host_ctrl__">
 (function () {
+  function findFallbackNextButton() {
+    // Best-effort: look for common "next" button ids/text used by
+    // hand-rolled (non-canonical) widgets so REPLAY isn't a total no-op.
+    var byId = document.getElementById('nextBtn') || document.getElementById('btnNext');
+    if (byId) return byId;
+    var candidates = document.querySelectorAll('button');
+    for (var i = 0; i < candidates.length; i++) {
+      var txt = (candidates[i].textContent || '').trim();
+      if (/التالي|next|suivant|▶/i.test(txt)) return candidates[i];
+    }
+    return null;
+  }
   function autoPlay() {
     var reset = document.getElementById('btnReset');
     var play  = document.getElementById('btnPlay');
-    if (reset) reset.click();
-    setTimeout(function () { if (play) play.click(); }, 80);
+    if (reset || play) {
+      if (reset) reset.click();
+      setTimeout(function () { if (play) play.click(); }, 80);
+      return;
+    }
+    // Non-canonical widget: no reset/play controls exist. Don't silently
+    // no-op — at least try to advance one step so the click-to-replay
+    // affordance does something visible.
+    var next = findFallbackNextButton();
+    if (next) next.click();
+  }
+  function hideMirrorButton() {
+    function isMirror(el) {
+      var t = (el.textContent || '').trim();
+      return t.indexOf('قلب الاتجاه') !== -1 || t.indexOf('\u2194') !== -1;
+    }
+    function hideIn(topbar) {
+      var candidates = topbar.querySelectorAll('button, a, [role="button"]');
+      for (var i = 0; i < candidates.length; i++) {
+        if (isMirror(candidates[i])) {
+          candidates[i].style.setProperty('display', 'none', 'important');
+        }
+      }
+    }
+    function watchTopbar(topbar) {
+      hideIn(topbar);
+      new MutationObserver(function () { hideIn(topbar); })
+        .observe(topbar, { childList: true, subtree: true, characterData: true });
+    }
+    var existing = document.querySelector('.mm-topbar');
+    if (existing) {
+      watchTopbar(existing);
+      return;
+    }
+    // Topbar not in the DOM yet (renders slightly after load) — watch for it.
+    var bodyObserver = new MutationObserver(function () {
+      var tb = document.querySelector('.mm-topbar');
+      if (tb) {
+        watchTopbar(tb);
+        bodyObserver.disconnect();
+      }
+    });
+    bodyObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       setTimeout(autoPlay, 300);
       watchLabel();
+      hideMirrorButton();
     });
   } else {
     setTimeout(autoPlay, 300);
     watchLabel();
+    hideMirrorButton();
   }
   window.addEventListener('message', function (e) {
     if (e.data && e.data.type === 'REPLAY') autoPlay();
@@ -242,6 +426,100 @@ const WIDGET_SCRIPT = `
 // Adds: scroll-wheel zoom, pinch-to-zoom (touch), drag-to-pan when zoomed,
 // and +/-/reset buttons. Click-to-replay still works when not panning.
 
+// A widget is a mindmap if its HTML contains the mindmap-specific
+// scaffolding classes injected by the backend (.mm-topbar / .mm-wrap),
+// which only exist in the markmap template — never in canvas/interactive_svg.
+function isMindmapContent(content: string): boolean {
+  return /mm-wrap|mm-topbar/i.test(content);
+}
+
+// FIX ("stuck on step 1" / widget unusable when the LLM ignores the id
+// contract): the backend (stream_handler.py) tries to repair canvas
+// widgets that don't match CANVAS_TEMPLATE's exact ids
+// (btnPlay/btnPrev/btnNext/btnReset/lbl), but that repair can itself fail
+// and, by design, fails OPEN — it ships the original non-canonical widget
+// to the client rather than blocking the response. Before this fix, the
+// frontend always assumed the canonical ids were present: it hid every
+// button and force-set pointerEvents:none on the iframe, routing all
+// interaction through a single outer "replay" click handler that only
+// knew how to click #btnReset/#btnPlay. A widget using different ids
+// (e.g. #prevBtn/#nextBtn/#stepLabel) was then both invisible-button AND
+// unclickable — frozen on its first render, which is exactly what showed
+// up as a "cut off" canvas.
+//
+// This detects that mismatch so the panel can fall back to letting the
+// widget's own (real, visible) buttons receive clicks directly, the same
+// way mindmap widgets already do.
+//
+// NOTE (canvas → animated SVG engine migration): this check still looks
+// for a literal `<canvas` tag. The server-owned animated engine no longer
+// emits one (it now renders <svg id="c">), so for that widget this
+// correctly returns false — it's always canonical (ids are server-owned,
+// never LLM-authored), so it should never be routed through the
+// non-canonical/native-interaction path. The one remaining template that
+// still uses a real <canvas> tag is INTERACTIVE_SVG_TEMPLATE (the
+// angle-tabs widget), which was never touched by the migration and still
+// needs this check exactly as before.
+function isNonCanonicalCanvasContent(content: string): boolean {
+  if (!content) return false;
+  if (isMindmapContent(content)) return false;
+  if (!/<canvas/i.test(content)) return false;
+  const hasCanonicalIds =
+    /id=["']btnPlay["']/i.test(content) &&
+    /id=["']btnPrev["']/i.test(content) &&
+    /id=["']btnNext["']/i.test(content) &&
+    /id=["']btnReset["']/i.test(content);
+  return !hasCanonicalIds;
+}
+
+// FIX (literal ```label / ``` text visible in the canvas panel): this used
+// to be a single inline regex — /```(?:interactive_svg|svg)\s*([\s\S]*?)```/
+// — that only recognized "interactive_svg" or "svg" as fence labels, and
+// whose fallback on no match was `raw` itself: the ENTIRE message content,
+// backticks and label included, injected straight into the iframe's <body>
+// as visible text. Real model output isn't always that narrow shape —
+// Gemini has been observed using a third label ("html"), gluing the label
+// to a bare fence with no language tag, or skipping the fence entirely.
+// This mirrors the same tolerant shape-matching already applied on the
+// backend (stream_handler.py's _unwrap_fence) so a label/fence mismatch
+// here can't dump raw markdown fence syntax into the widget iframe again:
+//   1. ```label\n...\n```            (glued fence, label = interactive_svg/svg/html)
+//   2. label\n\n```\n...\n```         (label line, then a bare/unlabeled fence)
+//   3. ```\n...\n```                  (bare fence, no label at all)
+//   4. label\n\n<raw html/js>         (label line, no fence at all)
+// If truly none of these match, a last-resort safety net strips any
+// leading/trailing fence or label line it can find rather than shipping
+// the raw text (with backticks) straight into the widget iframe.
+const FENCE_RE                = /```(?:interactive_svg|svg|html)?\s*\n?([\s\S]*?)```/;
+const LABEL_THEN_BARE_FENCE_RE = /(?:interactive_svg|svg|html)\s*\n+```\s*\n?([\s\S]*?)```/;
+const BARE_FENCE_RE            = /```\s*\n?([\s\S]*?)```/;
+const LABEL_NO_FENCE_RE        = /^\s*(?:interactive_svg|svg|html)\s*\n+([\s\S]+)$/;
+
+function extractWidgetContent(raw: string): string {
+  if (!raw) return raw;
+
+  let m = raw.match(FENCE_RE);
+  if (m) return m[1].trim();
+
+  m = raw.match(LABEL_THEN_BARE_FENCE_RE);
+  if (m) return m[1].trim();
+
+  m = raw.match(BARE_FENCE_RE);
+  if (m) return m[1].trim();
+
+  m = raw.trim().match(LABEL_NO_FENCE_RE);
+  if (m) return m[1].trim();
+
+  // Safety net: none of the known shapes matched. Strip a leading
+  // fence/label line and a trailing bare fence line if present, instead
+  // of returning the untouched raw string with backticks still attached.
+  return raw
+    .replace(/^\s*```[a-zA-Z_]*\s*\n?/, "")
+    .replace(/\n?```\s*$/, "")
+    .replace(/^\s*(?:interactive_svg|svg|html)\s*\n+/, "")
+    .trim();
+}
+
 function CanvasPanel({
   content,
   isSpeaking,
@@ -257,11 +535,27 @@ function CanvasPanel({
   const [isHovered, setIsHovered] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Detect mindmap so we can flip its interaction model (Option B):
+  // mindmaps get real pointer events (native markmap click-to-fold),
+  // while canvas/interactive_svg widgets keep their existing
+  // pointer-events:none + single-click-anywhere-to-replay behavior.
+  const isMindmap = content ? isMindmapContent(content) : false;
+
+  // FIX: widgets that don't match the canonical btnPlay/btnPrev/btnNext/
+  // btnReset id contract (backend repair failed open) get the same
+  // treatment as mindmaps — real pointer events so their own buttons are
+  // clickable — instead of being silently frozen behind pointerEvents:none.
+  const isNonCanonical = content ? isNonCanonicalCanvasContent(content) : false;
+  const usesNativeInteraction = isMindmap || isNonCanonical;
+
   // ── zoom / pan state ──────────────────────────────────────────────
   const [zoom, setZoom] = useState(1);
   const [pan, setPan]   = useState({ x: 0, y: 0 });
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 3;
+
+  // ── fullscreen modal state (mindmap only) ──────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const dragState = useRef<{ dragging: boolean; moved: boolean; startX: number; startY: number; startPan: { x: number; y: number } }>({
     dragging: false, moved: false, startX: 0, startY: 0, startPan: { x: 0, y: 0 },
@@ -306,25 +600,6 @@ function CanvasPanel({
       startPan: pan,
     };
   };
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const d = dragState.current;
-      if (!d.dragging) return;
-      const dx = e.clientX - d.startX;
-      const dy = e.clientY - d.startY;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) d.moved = true;
-      const { x, y } = clampPan(d.startPan.x + dx, d.startPan.y + dy, zoom);
-      setPan({ x, y });
-    };
-    const onUp = () => { dragState.current.dragging = false; };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [zoom]);
 
   // Touch pinch-to-zoom + one-finger pan
   const dist = (t: React.TouchList | TouchList) => {
@@ -393,6 +668,7 @@ function CanvasPanel({
     blobUrlRef.current = url;
     if (iframeRef.current) iframeRef.current.src = url;
     resetZoom();
+    setIsFullscreen(false);
     return () => {
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current);
@@ -413,7 +689,7 @@ function CanvasPanel({
 
   return (
     <div
-      onClick={content ? handleReplay : undefined}
+      onClick={content && !usesNativeInteraction ? handleReplay : undefined}
       onMouseEnter={() => content && setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onWheel={onWheel}
@@ -425,18 +701,18 @@ function CanvasPanel({
         position: "relative",
         width: "100%",
         height: "100%",
-        background: "#1a2035",
+        background: "#e7e8e9",
         backgroundImage: `
           linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
           linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)
         `,
         backgroundSize: "32px 32px",
         overflow: "hidden",
-        cursor: content ? (zoom > 1 ? "grab" : "pointer") : "default",
+        cursor: content ? (usesNativeInteraction ? "default" : (zoom > 1 ? "grab" : "pointer")) : "default",
       }}
     >
       <AnimatePresence>
-        {content && (isHovered || showHint) && (
+        {content && !usesNativeInteraction && (isHovered || showHint) && (
           <motion.div
             key="replay-hint"
             initial={{ opacity: 0, y: 4 }}
@@ -467,8 +743,11 @@ function CanvasPanel({
         )}
       </AnimatePresence>
 
-      {/* Zoom controls */}
-      {content && (
+      {/* Zoom controls — canvas/interactive_svg widgets only.
+          Mindmaps AND non-canonical widgets (real pointer events, own
+          buttons) skip these: manual +/- would just fight with the
+          widget's native interaction once pointerEvents is auto. */}
+      {content && !usesNativeInteraction && (
         <div
           onClick={(e) => e.stopPropagation()}
           style={{
@@ -507,6 +786,28 @@ function CanvasPanel({
         </div>
       )}
 
+      {/* Expand-to-fullscreen control — mindmap widgets only */}
+      {content && isMindmap && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            zIndex: 30,
+          }}
+        >
+          <button
+            onClick={() => setIsFullscreen(true)}
+            style={darkGrayBtnStyle}
+            aria-label="expand mindmap"
+            title={lang === "ar" ? "تكبير الخريطة" : "Agrandir la carte"}
+          >
+            ⤢
+          </button>
+        </div>
+      )}
+
       {/* Scalable / pannable wrapper around the iframe */}
       <div
         style={{
@@ -529,12 +830,76 @@ function CanvasPanel({
             display: "block",
             zIndex: 1,
             background: "transparent",
-            pointerEvents: "none",
+            // FIX: non-canonical widgets (missing the canonical
+            // btnPlay/btnPrev/btnNext/btnReset ids) now get real pointer
+            // events too, same as mindmaps, so their own on-page buttons
+            // are actually clickable instead of silently inert.
+            pointerEvents: usesNativeInteraction ? "auto" : "none",
           }}
           sandbox="allow-scripts"
           title="interactive geometry widget"
         />
       </div>
+
+      {/* Fullscreen mindmap modal — reuses the same blob URL, rendered
+          at a much larger size for readability. Only ever mounted for
+          mindmap widgets. Click on the backdrop or the ✕ button closes it. */}
+      {isMindmap && isFullscreen && (
+        <div
+          onClick={() => setIsFullscreen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(10,14,30,0.92)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "4vh 4vw",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "92vw",
+              height: "92vh",
+              background: "#1a2035",
+              borderRadius: 16,
+              overflow: "hidden",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+            }}
+          >
+            <button
+              onClick={() => setIsFullscreen(false)}
+              aria-label="close"
+              title={lang === "ar" ? "إغلاق" : "Fermer"}
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                zIndex: 10,
+                ...darkGrayBtnStyle,
+              }}
+            >
+              ✕
+            </button>
+            <iframe
+              src={blobUrlRef.current ?? undefined}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                border: "none",
+                background: "transparent",
+              }}
+              sandbox="allow-scripts"
+              title="mindmap fullscreen"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -552,6 +917,22 @@ const zoomBtnStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
+};
+
+const darkGrayBtnStyle: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: 8,
+  border: "1px solid rgba(255,255,255,0.16)",
+  background: "#787f8c",
+  color: "#ffffff",
+  fontSize: 16,
+  lineHeight: 1,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
 };
 
 // ── DraggableAvatar ───────────────────────────────────────────────────────────
@@ -755,8 +1136,41 @@ function Sidebar({
 // ── Chat (main) ───────────────────────────────────────────────────────────────
 export default function Chat() {
   const lang = useLang();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const username = getUserPref(user?.id, "username", "Élève");
+
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAccountMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [accountMenuOpen]);
+
+  const handleLogout = async () => {
+    setAccountMenuOpen(false);
+    try {
+      await signOut();
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(ACTIVE_KEY);
+      window.location.href = "/";
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+  };
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -785,7 +1199,78 @@ export default function Chat() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
-  const wsRef     = useRef<WebSocket | null>(null);
+
+  // FIX (save guard): the new "save after streaming" effect below must not
+  // push local state to Supabase before the initial remote load/merge has
+  // finished — otherwise a stale local copy could overwrite a newer remote
+  // one. Flipped to true once the load/merge effect completes (success or
+  // failure).
+  const remoteLoadedRef = useRef(false);
+
+  // ── Audio playback queue (NEW) ──────────────────────────────────────────
+  // Backend (stream_handler.py / tts_chunker.py) streams one SSE
+  // "audio_chunk" event per synthesized [SPEECH] sentence, ALREADY in
+  // playback order (tts_chunker.py's _pending queue guarantees index N
+  // is popped/sent before index N+1, even if N+1's ElevenLabs call
+  // happened to finish synthesizing first). This queue's only job is
+  // sequential client-side playback: play chunk, wait for it to end,
+  // play the next one — no reordering logic needed here.
+  //
+  // avatarSpeaking is now driven by ACTUAL audio playback (audio.onplay/
+  // onended below), not by isTyping (whether the LLM is still streaming
+  // text) or by the old WebSocket+speechSynthesis pipeline that used to
+  // set it (removed — see git history / previous version of this file;
+  // it talked to a different endpoint, /ws/avatar, that has nothing to do
+  // with the ElevenLabs audio_chunk events this queue now plays).
+  const audioQueueRef   = useRef<{ index: number; url: string }[]>([]);
+  const isPlayingRef    = useRef(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopAndClearAudioQueue = () => {
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
+    if (currentAudioRef.current) {
+      currentAudioRef.current.onended = null;
+      currentAudioRef.current.onerror = null;
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    setAvatarSpeaking(false);
+  };
+
+  const playNextInAudioQueue = () => {
+    if (isPlayingRef.current) return;
+    const next = audioQueueRef.current.shift();
+    if (!next) {
+      setAvatarSpeaking(false);
+      return;
+    }
+    isPlayingRef.current = true;
+    setAvatarSpeaking(true);
+    const audio = new Audio(next.url);
+    currentAudioRef.current = audio;
+    const advance = () => {
+      isPlayingRef.current = false;
+      currentAudioRef.current = null;
+      playNextInAudioQueue();
+    };
+    audio.onended = advance;
+    // A single failed chunk (bad base64, decode error, ...) must never
+    // wedge the rest of the turn's narration — skip it and keep going,
+    // same fail-open philosophy as the backend's own TTS error handling.
+    audio.onerror = advance;
+    audio.play().catch(advance);
+  };
+
+  const enqueueAudioChunk = (chunk: AudioChunkPayload) => {
+    const url = `data:audio/mpeg;base64,${chunk.audio_base64}`;
+    // Defensive sort by index: the backend already guarantees ordered
+    // delivery (see tts_chunker.py), so in practice this is a no-op —
+    // kept as a cheap safety net rather than a load-bearing reorder step.
+    audioQueueRef.current.push({ index: chunk.index, url });
+    audioQueueRef.current.sort((a, b) => a.index - b.index);
+    playNextInAudioQueue();
+  };
 
   const latestWidgetMsg = [...messages].reverse().find(m => m.role === "ai" && m.hasWidget);
   const pinnedWidgetMsg = pinnedWidgetId
@@ -796,8 +1281,7 @@ export default function Chat() {
   const canvasContent = (() => {
     if (!activeWidgetMsg) return "";
     const raw = activeWidgetMsg.content ?? "";
-    const match = raw.match(/```(?:interactive_svg|svg)\s*([\s\S]*?)```/);
-    return match ? match[1].trim() : raw;
+    return extractWidgetContent(raw);
   })();
 
   const getWidgetMessageForIndex = (i: number): Message | undefined => {
@@ -812,22 +1296,85 @@ export default function Chat() {
     setPinnedWidgetId(null);
   }, [activeId]);
 
+  // FIX: persist conversations to localStorage whenever they change.
+  // Previously saveConversations() was defined but never called, so
+  // localStorage stayed stale and refreshing the page always reloaded
+  // an old/frozen snapshot instead of the current conversation list.
+  useEffect(() => {
+    saveConversations(conversations);
+  }, [conversations]);
+
+  // FIX: persist the active conversation id to localStorage whenever it
+  // changes. Previously ACTIVE_KEY was only ever read, never written, so
+  // on refresh it was always missing/stale and the app fell back to
+  // conversations[0] every time — always landing on the same conversation.
+  useEffect(() => {
+    if (activeId) localStorage.setItem(ACTIVE_KEY, activeId);
+  }, [activeId]);
+
+  // FIX (conversation-loss race): this used to be an unconditional
+  // setConversations(remote) whenever `user.id` became available. If the
+  // person started chatting before Supabase auth finished resolving
+  // (plausible: local state is usable immediately from localStorage, but
+  // `user` here is still null/undefined for a beat after mount), any
+  // message sent during that window was appended to LOCAL state only —
+  // updateConversation()'s `if (user?.id && updatedConv)` guard skips the
+  // Supabase upsert whenever user.id isn't ready yet. The next tick, this
+  // effect fires, fetches whatever was already in Supabase from BEFORE
+  // this session, and replaces state wholesale — silently deleting the
+  // in-progress conversation from state and localStorage, and (since it
+  // was never upserted) from Supabase too. activeId then pointed at
+  // nothing in the new list and fell back to remote[0].id — exactly "my
+  // conversation turned into a different/new one".
+  //
+  // Fix: merge instead of overwrite. A conversation that's local-only, or
+  // newer locally than its remote copy, is kept — and queued below to be
+  // pushed TO Supabase, instead of this effect only ever pulling FROM it.
   useEffect(() => {
     if (!user?.id) return;
+    const userId = user.id;
     (async () => {
       try {
-        const remote = await loadConversationsFromSupabase(user.id);
-        if (remote.length > 0) {
-          setConversations(remote);
-          saveConversations(remote);
-          const savedActive = localStorage.getItem(ACTIVE_KEY);
-          if (savedActive && remote.find(c => c.id === savedActive)) {
-            setActiveId(savedActive);
-          } else {
-            setActiveId(remote[0].id);
+        const remote = await loadConversationsFromSupabase(userId);
+        const remoteById = new Map(remote.map(c => [c.id, c]));
+
+        const toUpsert: Conversation[] = [];
+        let mergedResult: Conversation[] = [];
+
+        setConversations(prev => {
+          const merged = new Map<string, Conversation>(remoteById);
+          for (const local of prev) {
+            const remoteVersion = merged.get(local.id);
+            if (!remoteVersion || local.updatedAt > remoteVersion.updatedAt) {
+              merged.set(local.id, local);
+            }
+          }
+          mergedResult = Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+          return mergedResult;
+        });
+
+        // Side effects AFTER setConversations() returns — the updater
+        // passed to setConversations must stay pure (no network calls
+        // inside it).
+        saveConversations(mergedResult);
+        for (const c of mergedResult) {
+          const remoteVersion = remoteById.get(c.id);
+          if (!remoteVersion || c.updatedAt > remoteVersion.updatedAt) {
+            toUpsert.push(c);
           }
         }
+        toUpsert.forEach(c => upsertConversation(c, userId).catch(() => {}));
+
+        const savedActive = localStorage.getItem(ACTIVE_KEY);
+        if (savedActive && mergedResult.find(c => c.id === savedActive)) {
+          setActiveId(savedActive);
+        } else if (mergedResult.length > 0) {
+          setActiveId(mergedResult[0].id);
+        }
       } catch {}
+      // FIX (save guard): remote load/merge is done (or failed) — the
+      // save-after-streaming effect below is now allowed to write.
+      remoteLoadedRef.current = true;
     })();
   }, [user?.id]);
 
@@ -850,47 +1397,44 @@ export default function Chat() {
     if (isNearBottom) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  // Stop any in-flight audio playback if the component unmounts mid-turn
+  // (e.g. navigating away) — otherwise a chunk could keep playing over a
+  // screen that no longer shows the conversation it belongs to.
   useEffect(() => {
-    let closed = false;
-    let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(AVATAR_WS_URL);
-      wsRef.current = ws;
-      ws.onmessage = (ev) => {
-        let token = "";
-        try { const d = JSON.parse(ev.data); token = d.text ?? d.token ?? ""; }
-        catch { token = String(ev.data); }
-        if (!token) return;
-        if (typeof window !== "undefined" && "speechSynthesis" in window) {
-          const u = new SpeechSynthesisUtterance(token);
-          u.lang    = lang === "ar" ? "ar-TN" : "fr-FR";
-          u.onstart = () => setAvatarSpeaking(true);
-          u.onend   = () => setAvatarSpeaking(false);
-          window.speechSynthesis.speak(u);
-        }
-      };
-      ws.onclose = () => { if (!closed) wsRef.current = null; };
-      ws.onerror = () => {};
-    } catch {}
-    return () => {
-      closed = true;
-      try { ws?.close(); } catch {}
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, [lang]);
+    return () => stopAndClearAudioQueue();
+  }, []);
 
+  // FIX (truncated conversations in Supabase — THE main bug): updateConversation
+  // used to capture `updatedConv` inside the setConversations updater and then
+  // check it right after setConversations() returned. React does not guarantee
+  // the updater runs synchronously, so `updatedConv` was often still undefined
+  // at that point and the upsert was silently skipped — including the final
+  // onDone save, which left the partial streamed text in Supabase.
+  //
+  // updateConversation is now a pure state update (and bumps updatedAt on
+  // every change so the load-time merge correctly prefers the newest copy).
+  // Saving to Supabase is handled by the effect below, which always sees the
+  // latest committed state and waits until streaming has stopped.
   const updateConversation = (id: string, updater: (c: Conversation) => Conversation) => {
-    setConversations(prev => {
-      const next = prev.map(c => c.id === id ? updater(c) : c);
-      if (user?.id) {
-        const updated = next.find(c => c.id === id);
-        if (updated) upsertConversation(updated, user.id).catch(() => {});
-      }
-      return next;
-    });
+    setConversations(prev =>
+      prev.map(c => (c.id === id ? { ...updater(c), updatedAt: Date.now() } : c))
+    );
   };
+
+  // FIX: save the active conversation to Supabase once streaming has stopped
+  // (debounced 600 ms), always from the latest committed state — never mid-
+  // stream, never from a stale closure. Waits for the initial remote merge
+  // (remoteLoadedRef) so a stale local copy can't overwrite a newer remote one.
+  useEffect(() => {
+    if (!user?.id || isTyping || !remoteLoadedRef.current) return;
+    const conv = conversations.find(c => c.id === activeId);
+    if (!conv || conv.messages.length === 0) return;
+    const userId = user.id;
+    const h = setTimeout(() => {
+      upsertConversation(conv, userId).catch(err => console.error("save failed", err));
+    }, 600);
+    return () => clearTimeout(h);
+  }, [conversations, activeId, isTyping, user?.id]);
 
   const handleNewConversation = () => {
     const nc = createNewConversation(lang);
@@ -905,30 +1449,50 @@ export default function Chat() {
     setSidebarOpen(false);
   };
 
+  // FIX (same class of bug as updateConversation above): setActiveId() and
+  // upsertConversation() used to be called from INSIDE the setConversations
+  // updater. Now the updater only computes/returns the new array and
+  // records what happened (new active id / newly-created conversation,
+  // if any) into local variables; both side effects run once, after
+  // setConversations() returns.
   const handleDeleteConversation = (id: string) => {
     if (user?.id) deleteConversationFromSupabase(id).catch(() => {});
+
+    let newActiveId: string | undefined;
+    let createdConv: Conversation | undefined;
+
     setConversations(prev => {
       const next = prev.filter(c => c.id !== id);
       if (next.length === 0) {
         const nc = createNewConversation(lang);
-        setActiveId(nc.id);
-        if (user?.id) upsertConversation(nc, user.id).catch(() => {});
+        createdConv = nc;
+        newActiveId = nc.id;
         return [nc];
       }
-      if (id === activeId) setActiveId(next[0].id);
+      if (id === activeId) newActiveId = next[0].id;
       return next;
     });
+
+    if (newActiveId) setActiveId(newActiveId);
+    if (createdConv && user?.id) upsertConversation(createdConv, user.id).catch(() => {});
   };
 
+  // FIX (generateTitle bypassing API_BASE/auth — silently broken in prod):
+  // every other network call in this app goes through apiPost/apiGet
+  // (prefixing API_BASE and attaching the Supabase auth header) or
+  // manually replicates that pattern (askStreamSse). This function used a
+  // raw fetch("/api/generate-title", ...) — a relative path (hits the
+  // frontend's own origin instead of the backend whenever they're on
+  // different origins, which API_BASE's existence implies they are) with
+  // no auth header. That request would 404/fail, throw, and be silently
+  // swallowed by the empty catch — so conversation titles never populated,
+  // with zero error surfaced anywhere. Now routed through apiPost() like
+  // the rest of the app.
   const generateTitle = async (firstUserMessage: string, convId: string) => {
     try {
-      const res = await fetch("/api/generate-title", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ message: firstUserMessage }),
+      const { title } = await apiPost<{ title: string }>("/generate-title", {
+        message: firstUserMessage,
       });
-      if (!res.ok) throw new Error("title fetch failed");
-      const { title } = await res.json();
       if (title) updateConversation(convId, c => ({ ...c, title }));
     } catch {}
   };
@@ -966,19 +1530,53 @@ export default function Chat() {
     setIsTyping(true);
     setPinnedWidgetId(null);
 
+    // New turn starting — drop any narration still queued/playing from the
+    // previous turn instead of letting it bleed into this one.
+    stopAndClearAudioQueue();
+
+    // FIX (live streaming): accumulates teacher_chunk text as it arrives
+    // (see stream_handler.py v3.2 / api.ts's onTeacherToken). This is raw,
+    // not-yet-post-processed text — isolate_inline_math()/
+    // normalize_exercise_layout() only run once, server-side, on the full
+    // string in the "done" event — so onDone below still overwrites
+    // `teacher` with the server's final, post-processed version once
+    // streaming ends. This local variable only drives the live-typing
+    // display in between.
+    let teacherSoFar = "";
+
     try {
       await askStreamSse(question, convId, historySnapshot, {
         onToken: (_token) => {},
-        onDone: (widget, teacher) => {
+        onTeacherToken: (token) => {
+          teacherSoFar += token;
+          updateConversation(convId, c => ({
+            ...c,
+            messages: c.messages.map(m =>
+              m.id === aiId ? { ...m, teacher: teacherSoFar } : m
+            ),
+          }));
+        },
+        // NEW: each [SPEECH] sentence's synthesized audio, as it's ready —
+        // see api.ts's audio_chunk case. Enqueue-and-play; avatarSpeaking
+        // now tracks real playback instead of isTyping.
+        onAudioChunk: (chunk) => {
+          enqueueAudioChunk(chunk);
+        },
+        // NEW: backend has no more audio_chunk events coming this turn.
+        // Nothing to do here beyond bookkeeping — the queue keeps draining
+        ///playing on its own; this does NOT mean playback has finished.
+        onAudioDone: (_count) => {},
+        onDone: (widget, teacher, representation) => {
           updateConversation(convId, c => ({
             ...c,
             messages: c.messages.map(m =>
               m.id === aiId
                 ? {
                     ...m,
-                    content:   widget || m.content,
-                    teacher:   teacher || undefined,
-                    hasWidget: Boolean(widget),
+                    content:        (widget && widget.trim()) ? widget : m.content,
+                    teacher:        teacher || undefined,
+                    hasWidget:      Boolean(widget && widget.trim()),
+                    representation: representation || undefined,
                   }
                 : m
             ),
@@ -1046,7 +1644,17 @@ export default function Chat() {
       </div>
 
       {/* ── RIGHT PANEL — chat (7/12) ── */}
-      <div className="w-full lg:w-[55%] shrink-0 flex flex-col min-w-0 relative" dir={isRTL ? "rtl" : "ltr"}>
+      {/* FIX: this wrapper's dir was previously tied to the UI language
+          (dir={isRTL ? "rtl" : "ltr"}). Since it is the flex ancestor of
+          the message rows below (which use justify-end/justify-start),
+          flipping it to "rtl" silently reversed those logical alignment
+          keywords — user and AI bubbles swapped physical sides whenever
+          the interface language was Arabic. dir is now hardcoded to "ltr"
+          so bubble alignment is always tied to role, never to locale.
+          Nothing else in this wrapper changed; child elements (header,
+          sidebar, input) already set their own dir independently and are
+          unaffected. */}
+      <div className="w-full lg:w-[55%] shrink-0 flex flex-col min-w-0 relative" dir="ltr">
 
         <Sidebar
           open={sidebarOpen}
@@ -1069,9 +1677,36 @@ export default function Chat() {
             >
               <User className="w-4 h-4" />
             </button>
-            <span className="hidden sm:block text-sm font-medium text-foreground">{username}</span>
-            <div className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold">
-              {username[0]?.toUpperCase()}
+            <div className="relative" ref={accountMenuRef}>
+              <button
+                onClick={() => setAccountMenuOpen(v => !v)}
+                className="flex flex-row items-center gap-2 shrink-0 p-1 rounded-lg hover:bg-muted transition-colors"
+              >
+                <span className="hidden sm:block text-sm font-medium text-foreground">{username}</span>
+                <div className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold">
+                  {username[0]?.toUpperCase()}
+                </div>
+              </button>
+
+              <AnimatePresence>
+                {accountMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full left-0 mt-2 w-44 rounded-xl bg-popover border border-border shadow-md z-50 overflow-hidden"
+                  >
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      {st("logout", lang)}
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
@@ -1120,14 +1755,8 @@ export default function Chat() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
-                  className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                  className={`flex w-full ${msg.role === "user" ? "justify-start" : "justify-end"}`}
                 >
-                {msg.role === "ai" && (
-                  <div className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold shrink-0 mt-1 mr-2">
-                    AI
-                  </div>
-                )}
-
                 {/* FIX: wrapper made a flex container with minWidth: 0 and
                     maxWidth: 100% so it never collapses the bubble down to a
                     single-character width (which caused short messages like
@@ -1140,30 +1769,41 @@ export default function Chat() {
                     isStreaming={false}
                   />
                 ) : (
-                  <div
-                    onClick={widgetMsg ? () => setPinnedWidgetId(widgetMsg.id) : undefined}
-                    title={widgetMsg ? st("view_drawing", lang) : undefined}
-                    style={{
-                      display: "flex",
-                      minWidth: 0,
-                      maxWidth: "100%",
-                      ...(widgetMsg
-                        ? {
-                            cursor: "pointer",
-                            borderRadius: "1rem",
-                            outline: isActiveWidget ? "2px solid rgba(99,80,219,0.55)" : "2px solid transparent",
-                            outlineOffset: "2px",
-                            transition: "outline 0.2s ease",
-                          }
-                        : {}),
-                    }}
-                  >
-                    <MessageBubble
-                      msg={msg}
-                      lang={lang}
-                      isStreaming={i === messages.length - 1 && isTyping}
-                    />
-                  </div>
+                  <>
+                    <div
+                      onClick={widgetMsg ? () => setPinnedWidgetId(widgetMsg.id) : undefined}
+                      title={widgetMsg ? st("view_drawing", lang) : undefined}
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        ...(widgetMsg
+                          ? {
+                              cursor: "pointer",
+                              borderRadius: "1rem",
+                              outline: isActiveWidget ? "2px solid rgba(99,80,219,0.55)" : "2px solid transparent",
+                              outlineOffset: "2px",
+                              transition: "outline 0.2s ease",
+                            }
+                          : {}),
+                      }}
+                    >
+                      <MessageBubble
+                        msg={msg}
+                        lang={lang}
+                        isStreaming={i === messages.length - 1 && isTyping}
+                      />
+                    </div>
+                    {/* FIX: avatar now renders AFTER the bubble (not before)
+                        so that, with justify-end on the row, it hugs the
+                        outer/right edge instead of sitting on the bubble's
+                        inner-left side. Margin flipped from mr-2 to ml-2
+                        to keep the same visual gap on its new side. */}
+                    <div className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold shrink-0 mt-1 ml-2">
+                      AI
+                    </div>
+                  </>
                 )}
               </motion.div>
             );
@@ -1191,9 +1831,15 @@ export default function Chat() {
           )}
 
           <div className="p-4 max-w-3xl mx-auto flex items-center gap-2">
-            <button className="p-2.5 rounded-xl hover:bg-muted transition-colors text-muted-foreground">
-              <Mic className="w-5 h-5" />
-            </button>
+            <motion.button
+              whileHover={{ scale: isLimitReached ? 1 : 1.05 }}
+              whileTap={{ scale: isLimitReached ? 1 : 0.95 }}
+              onClick={sendMessage}
+              disabled={isLimitReached}
+              className="p-2.5 rounded-xl gradient-primary text-primary-foreground shadow-soft disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="w-5 h-5" />
+            </motion.button>
             <input
               ref={inputRef}
               value={input}
@@ -1204,15 +1850,9 @@ export default function Chat() {
               disabled={messages.length >= 20}
               className="flex-1 px-4 py-3 rounded-xl bg-muted/50 border border-border text-base focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             />
-            <motion.button
-              whileHover={{ scale: isLimitReached ? 1 : 1.05 }}
-              whileTap={{ scale: isLimitReached ? 1 : 0.95 }}
-              onClick={sendMessage}
-              disabled={isLimitReached}
-              className="p-2.5 rounded-xl gradient-primary text-primary-foreground shadow-soft disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Send className="w-5 h-5" />
-            </motion.button>
+            <button className="p-2.5 rounded-xl hover:bg-muted transition-colors text-muted-foreground">
+              <Mic className="w-5 h-5" />
+            </button>
           </div>
         </div>
 

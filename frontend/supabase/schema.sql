@@ -1,7 +1,5 @@
 -- =====================================================================
 -- Prof IA — Supabase schema
--- Run this entire file in the Supabase SQL editor of your project
--- (https://app.supabase.com → SQL → New query → paste → Run).
 -- =====================================================================
 
 -- ---- Roles ----------------------------------------------------------

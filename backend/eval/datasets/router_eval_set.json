@@ -1,0 +1,81 @@
+[
+  {"question": "فسرلي الدرس 2", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "الدرس الثالث", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "اشرح لي درس الزوايا", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "leçon 6", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "explique moi la leçon sur le symétrie axiale", "expected_intent": "lesson", "expected_mode": "explanation"},
+
+  {"question": "ماهي خصائص القوة", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "ما هو العدد الأولي", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "شنية القسمة الإقليدية", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "c'est quoi le pgcd", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "qu'est-ce que la symétrie axiale", "expected_intent": "lesson", "expected_mode": "explanation"},
+
+  {"question": "لخص الدرس 6", "expected_intent": "summary", "expected_mode": "summary"},
+  {"question": "اعطيني ملخص شامل للدرس 2", "expected_intent": "summary", "expected_mode": "summary"},
+  {"question": "résumé du cours sur les angles", "expected_intent": "summary", "expected_mode": "summary"},
+
+  {"question": "أعطني تمرين على خصائص القوى", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "تمرين في الدرس 3", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "تمرن في المنصف العمودي", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "دربني في القواسم المشتركة", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "entraîne moi sur la symétrie axiale", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "donne moi un exercice sur les nombres premiers", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "تمارين حول القوة والقسمة الإقليدية", "expected_intent": "exercise", "expected_mode": "exercise"},
+
+  {
+    "question": "3⁴=81 et 5³=125 et 2⁶=64",
+    "history": [
+      {"role": "assistant", "content": "التمرين رقم 1: احسب 3⁴, 5³, 2⁶"}
+    ],
+    "expected_intent": "exercise_answer", "expected_mode": "exercise_answer"
+  },
+  {
+    "question": "x = 5",
+    "history": [
+      {"role": "assistant", "content": "التمرين رقم 1: حل المعادلة 2x = 10"}
+    ],
+    "expected_intent": "exercise_answer", "expected_mode": "exercise_answer"
+  },
+  {
+    "question": "اعطني إصلاح تمرين 2",
+    "history": [
+      {"role": "assistant", "content": "التمرين رقم 2: بسّط العبارة 2^3 × 2^5"}
+    ],
+    "expected_intent": "exercise_answer", "expected_mode": "exercise_answer"
+  },
+  {
+    "question": "صحح لي التمرين",
+    "history": [
+      {"role": "assistant", "content": "التمرين رقم 1: حدد قواسم العدد 24"}
+    ],
+    "expected_intent": "exercise_answer", "expected_mode": "exercise_answer"
+  },
+  {
+    "question": "donne-moi la correction de l'exercice 2",
+    "history": [
+      {"role": "assistant", "content": "Exercice 2: calcule le pgcd de 18 et 24"}
+    ],
+    "expected_intent": "exercise_answer", "expected_mode": "exercise_answer"
+  },
+
+  {"question": "نعم", "expected_intent": "follow_up", "expected_mode": "continuation",
+   "history": [{"role": "assistant", "content": "هل فهمت هذه النقطة؟ نكمل للتالية؟"}]},
+  {"question": "فهمت، واصل", "expected_intent": "follow_up", "expected_mode": "continuation",
+   "history": [{"role": "assistant", "content": "هل فهمت هذه النقطة؟ نكمل للتالية؟"}]},
+  {"question": "oui j'ai compris", "expected_intent": "follow_up", "expected_mode": "continuation",
+   "history": [{"role": "assistant", "content": "Tu as compris ce point ? On passe au suivant ?"}]},
+  {"question": "d'accord", "expected_intent": "follow_up", "expected_mode": "continuation",
+   "history": [{"role": "assistant", "content": "Tu as compris ce point ? On passe au suivant ?"}]},
+
+  {"question": "مرحبا", "expected_intent": "action", "expected_mode": "conversational"},
+  {"question": "شكرا", "expected_intent": "action", "expected_mode": "conversational"},
+  {"question": "bonjour", "expected_intent": "action", "expected_mode": "conversational"},
+  {"question": "merci beaucoup", "expected_intent": "action", "expected_mode": "conversational"},
+
+  {"question": "تمرن في خصائص القوة", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "درس 5 فيه إيه بالضبط", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "ما هي المضاعفات المشتركة", "expected_intent": "lesson", "expected_mode": "explanation"},
+  {"question": "أعطني 3 تمارين حول الأعداد الأولية فيما بينها", "expected_intent": "exercise", "expected_mode": "exercise"},
+  {"question": "cours sur le ppcm", "expected_intent": "lesson", "expected_mode": "explanation"}
+]

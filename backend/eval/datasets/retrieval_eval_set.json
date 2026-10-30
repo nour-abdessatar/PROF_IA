@@ -1,0 +1,39 @@
+[
+  {"question": "ما هو تعريف المجموعة", "expected_lesson_numbers": ["1"]},
+  {"question": "خصائص التبديل والتجميع في الجمع والطرح", "expected_lesson_numbers": ["1"]},
+  {"question": "التقاطع والاتحاد بين مجموعتين", "expected_lesson_numbers": ["1"]},
+  {"question": "خاصية التوزيع للضرب على الجمع", "expected_lesson_numbers": ["1"]},
+  {"question": "أولويات العمليات الحسابية", "expected_lesson_numbers": ["1", "2"]},
+
+  {"question": "كيف نكتب ونحسب القوة", "expected_lesson_numbers": ["2"]},
+  {"question": "ضرب قوتين لهما نفس القاعدة", "expected_lesson_numbers": ["2"]},
+  {"question": "ما هي المربعات الكاملة", "expected_lesson_numbers": ["2"]},
+  {"question": "خصائص القوى في الأعداد الطبيعية", "expected_lesson_numbers": ["2"]},
+
+  {"question": "شرح القسمة الإقليدية بالقسمة العمودية", "expected_lesson_numbers": ["3"]},
+  {"question": "ما هو العدد الأولي", "expected_lesson_numbers": ["3"]},
+  {"question": "تفكيك عدد إلى جداء عوامل أولية", "expected_lesson_numbers": ["3"]},
+  {"question": "قواسم عدد صحيح طبيعي وكيفية تحديدها", "expected_lesson_numbers": ["3"]},
+  {"question": "القواسم الأولية لعدد", "expected_lesson_numbers": ["3"]},
+
+  {"question": "كيف نحسب القاسم المشترك الأكبر pgcd", "expected_lesson_numbers": ["5"]},
+  {"question": "المضاعف المشترك الأصغر ppcm", "expected_lesson_numbers": ["5"]},
+  {"question": "الأعداد الأولية فيما بينها", "expected_lesson_numbers": ["5"]},
+  {"question": "مجموعة مضاعفات عدد طبيعي", "expected_lesson_numbers": ["5"]},
+
+  {"question": "كيفية إنشاء المنصف العمودي لقطعة مستقيمة بالبركار", "expected_lesson_numbers": ["6"]},
+  {"question": "العلاقة بين التعامد والتوازي", "expected_lesson_numbers": ["6"]},
+  {"question": "المماس للدائرة والوضعيات النسبية", "expected_lesson_numbers": ["6"]},
+
+  {"question": "أنواع الزوايا المتتامة والمتكاملة", "expected_lesson_numbers": ["7"]},
+  {"question": "كيفية بناء منصف الزاوية", "expected_lesson_numbers": ["7"]},
+  {"question": "مجموع زوايا المثلث", "expected_lesson_numbers": ["7"]},
+
+  {"question": "تعريف التناظر المحوري ومناظرة نقطة", "expected_lesson_numbers": ["8"]},
+  {"question": "مناظرة الدائرة بالنسبة لمحور التناظر", "expected_lesson_numbers": ["8"]},
+  {"question": "مناظرة الزوايا في التناظر المحوري", "expected_lesson_numbers": ["8"]},
+
+  {"question": "تمارين حول القوة والقسمة الإقليدية", "expected_lesson_numbers": ["2", "3"]},
+  {"question": "أعطني تمارين في المنصف العمودي والزوايا المتقابلة بالرأس", "expected_lesson_numbers": ["6", "7"]},
+  {"question": "درس المضاعفات المشتركة والأعداد الأولية", "expected_lesson_numbers": ["5", "3"]}
+]
