@@ -10,9 +10,7 @@ can give exercises and grade the student's answers.
 > curriculum, tracks progress through a lesson, and refuses (politely) topics that
 > are not in the programme.
 
-![Demo](docs/demo.gif)
-
-[Watch the full demo with voice](LINK_TO_VIDEO)
+[▶ Watch the demo (with voice)](docs/demo.mp4)
 
 ## Features
 
@@ -27,20 +25,7 @@ can give exercises and grade the student's answers.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Q[Student question] --> R[Router<br/>Gemini flash-lite]
-    R -->|in curriculum| P[Retriever<br/>dense + BM25 + RRF]
-    P --> RR[Reranker<br/>bge-reranker-v2-m3]
-    RR --> T[Teaching controller<br/>session state]
-    T --> PB[Prompt builder]
-    PB --> L[LLM chain<br/>Gemini]
-    L --> S[Stream splitter<br/>WIDGET / SPEECH / TEACHER]
-    S --> W[Widget registry<br/>layout + repair]
-    S --> V[TTS<br/>ElevenLabs]
-    W & V --> SSE[SSE to React frontend<br/>Supabase auth + data]
-    R -->|out of programme| O[Fixed reply]
-```
+   ![Architecture](docs/architecture.png)
 
 | Stage | File | What it does |
 |---|---|---|
