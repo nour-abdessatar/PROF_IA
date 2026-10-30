@@ -11,9 +11,10 @@ can give exercises and grade the student's answers.
 > curriculum, tracks progress through a lesson, and refuses (politely) topics that
 > are not in the programme.
 
+[▶ Watch the demo (with voice)](https://github.com/nour-abdessatar/PROF_IA/raw/main/docs/demo.mp4)
 
 https://github.com/user-attachments/assets/4f53feb6-d54c-4907-9296-2652d235f6c1
-[▶ Watch the demo (with voice)](https://github.com/nour-abdessatar/PROF_IA/raw/main/docs/demo.mp4)
+
 ## Features
 
 - **Curriculum-grounded answers:** hybrid retrieval (dense + BM25) fused with RRF, then a cross-encoder reranker.
