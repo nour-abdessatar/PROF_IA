@@ -106,7 +106,7 @@ Small, hand-built test sets, run against the real pipeline:
 | Router accuracy (intent / mode) | 38 hand-written questions covering all 6 intents | 100% |
 | Retrieval (hybrid + reranker) | 30 queries, each with a known correct lesson | Recall@4 = 100%, MRR = 0.961 |
 | Groundedness | 6 live answers scored by an LLM judge against the retrieved lesson | 6 / 6 grounded |
-| Latency | end-to-end answer | 12.7 s mean |
+| Latency | end-to-end answer | 15.7 s mean |
 
 How to read these numbers: the questions were written by the author, on a single
 subject with a small curriculum, so they show the pipeline works on the cases it was
