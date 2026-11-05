@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - ./backend/rag/.env
+    ports:
+      - "8001:8001"
+    volumes:
+      - hf_cache:/models
+      - qdrant_data:/app/rag/output
+
+volumes:
+  hf_cache:
+  qdrant_data:
