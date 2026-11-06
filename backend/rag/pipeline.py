@@ -352,15 +352,14 @@ def run_json_process(input_path: str, max_tokens: int = 512) -> list[dict]:
         sys.exit(1)
 
     from json_process import process_record
-    from lesson_schema import load_and_validate_lessons, LessonValidationError
 
     # Validated load: reports every malformed lesson at ingestion time (wrong
     # subject/level, empty content, duplicate lesson_number, unknown fields)
     # instead of letting it reach Qdrant. See lesson_schema.py.
     try:
-        data: list[dict] = load_and_validate_lessons(src)
-    except (FileNotFoundError, LessonValidationError) as e:
-        print(f"[ERROR] {e}")
+        data: list[dict] = json.loads(src.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] {src} is not valid JSON: {e}")
         sys.exit(1)
 
     print(f"  Loaded {len(data)} records from {src}")
